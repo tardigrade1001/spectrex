@@ -2,6 +2,8 @@
 
 Convert proprietary Hitachi spectrophotometer `.UDS` and `.FDS` binary files to plain CSV (and quick-look PNG plots) on any PC, without the original 1995-era Windows software.
 
+**📥 [Download `spectrex.exe` (no Python required)](https://github.com/tardigrade1001/spectrex/releases/latest)** for the standalone Windows build. Python users can run `spectrex.py` directly — see [Quick start](#quick-start).
+
 | UV-Vis absorbance (`.UDS`) | Fluorescence emission (`.FDS`) |
 |:---:|:---:|
 | ![UDS example](docs/example_uds.png) | ![FDS example](docs/example_fds.png) |
