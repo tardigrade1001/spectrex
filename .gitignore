@@ -30,3 +30,8 @@ scratch/
 # Real lab data: keep private. samples/ is the curated public demo set.
 Abs/
 FDS/
+
+# PyInstaller build artifacts (the .exe lives on GitHub Releases, not in the repo)
+build/
+dist/
+*.spec
