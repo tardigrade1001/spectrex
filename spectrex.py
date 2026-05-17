@@ -21,8 +21,6 @@ Errors are also appended to spectrex.log alongside the script for later review.
 import struct, os, sys, glob, math, traceback, datetime
 import matplotlib.pyplot as plt
 
-DECIMATE_FDS = True
-
 # ---------------- diagnostics ----------------
 
 class ParseError(RuntimeError):
@@ -211,15 +209,10 @@ def parse_fds(buf):
                          f"record size {rec_size}. Footer offset may have shifted.")
     n_records = (data_end - data_off) // rec_size
 
-    if DECIMATE_FDS:
-        values = [struct.unpack_from("<d", buf, data_off + i*rec_size)[0]
-                  for i in range(n_records)]
-        step = rec_size / 8 * storage_step
-    else:
-        values = []
-        for i in range(n_records):
-            values.extend(struct.unpack_from("<5d", buf, data_off + i*rec_size))
-        step = storage_step
+    values = []
+    for i in range(n_records):
+        values.extend(struct.unpack_from("<5d", buf, data_off + i*rec_size))
+    step = storage_step
 
     wavelengths = [start_nm + i * step for i in range(len(values))]
 
@@ -233,8 +226,7 @@ def parse_fds(buf):
     return dict(kind="FDS", sample=sample, timestamp=timestamp, operator=operator,
                 instrument=instrument, serial=serial, version=rom,
                 y_label="fluorescence", wavelengths=wavelengths, values=values,
-                step_nm=step, storage_step_nm=storage_step,
-                excitation_wl_nm=excitation_wl)
+                step_nm=step, excitation_wl_nm=excitation_wl)
 
 def parse(path):
     try:
@@ -271,7 +263,6 @@ def write_csv(p, csv_path):
             f.write(f"# Response setting: {fmt(p.get('response_setting'))}\n")
         else:  # FDS
             f.write(f"# Excitation wavelength: {fmt(p.get('excitation_wl_nm'), ' nm')}\n")
-            f.write(f"# Storage step (internal): {fmt(p.get('storage_step_nm'), ' nm')}\n")
             f.write(f"# Note: FDS scan speed, slit widths, PMT voltage, response, and delay\n")
             f.write(f"#       are not currently extracted (appear encoded in the binary; see README).\n")
         f.write(f"wavelength_nm,{p['y_label']}\n")

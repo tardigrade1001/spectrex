@@ -39,7 +39,7 @@ Each converted file gets a CSV containing the full spectrum (wavelength, absorba
 - Sample name, timestamp, instrument model, serial number
 - Sampling step, wavelength range
 - UDS: slit width, scan speed, path length, lamp change wavelength, baseline correction, response setting (full parameter set)
-- FDS: excitation wavelength, internal storage step
+- FDS: excitation wavelength
 
 ### Verification
 
