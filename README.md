@@ -37,7 +37,7 @@ Pointed at a folder, `spectrex.py`:
    - Parses the binary header (sample name, timestamp, instrument, scan parameters).
    - Extracts the data array.
    - For UDS: converts the stored transmittance to absorbance (`A = -log₁₀ T`) and reverses the scan direction so the CSV is in ascending wavelength order.
-   - For FDS: decimates the oversampled 0.2 nm internal storage to 1.0 nm to match the instrument's own TXT export. Set `DECIMATE_FDS = False` near the top of the script to keep full 0.2 nm resolution.
+   - For FDS: outputs the full 0.2 nm internal resolution.
    - Writes a CSV next to the original (same base name, `.csv` extension).
    - Writes a single-spectrum PNG next to it.
 3. Generates two overlay PNGs in a `plots/` folder, one for all UDS spectra and one for all FDS, for quick cross-sample comparison.
@@ -117,10 +117,9 @@ For FDS:
 # Timestamp: 12:07:49, 02/23/2022
 # Operator: demo
 # Instrument: F-4600 FL Spectrophotometer  SN 2967-002  v5J24000 02
-# Points: 201  Range: 300.00-500.00 nm
-# Sampling step: 1.0 nm
+# Points: 1001  Range: 300.00-500.00 nm
+# Sampling step: 0.2 nm
 # Excitation wavelength: 280.0 nm
-# Storage step (internal): 0.2 nm
 # Note: FDS scan speed, slit widths, PMT voltage, response, and delay
 #       are not currently extracted (appear encoded in the binary; see README).
 wavelength_nm,fluorescence
@@ -204,8 +203,8 @@ F+0     "Reagent 1\0Reagent 2\0..."               var
 
 Key facts:
 
-- The instrument scans at **0.2 nm resolution internally**. Its own TXT export decimates to 1 nm. Each 40-byte record holds 5 consecutive 0.2 nm samples.
-- The first double of each record (offset +0 within the record) is the 1 nm-grid value that matches the TXT. Set `DECIMATE_FDS = False` in the script to write all 5 samples per record at full 0.2 nm resolution.
+- The instrument scans at **0.2 nm resolution internally**. Each 40-byte record holds 5 consecutive 0.2 nm samples.
+- All 5 samples per record are written, giving full 0.2 nm resolution output.
 - Data scans low to high wavelength (the natural direction).
 - The end of data is located by searching for the `"Reagent 1\0"` ASCII marker. It sits 32 bytes after the last data record.
 - The "F-4600" instrument string is also used as a search anchor. The padding between the run-info strings and the instrument-block strings varies in length and fill byte across files.
@@ -257,7 +256,6 @@ The script does not care how your folders are organised. It just walks the tree.
 
 A few knobs near the top of `spectrex.py`:
 
-- `DECIMATE_FDS`: set to `False` to keep the full 0.2 nm internal resolution for FDS files instead of decimating to 1 nm.
 - Plot colour: the single-spectrum colour is `#e91e63` (pink). The overlay plot uses matplotlib's default colour cycle so each spectrum is distinguishable.
 
 ## Contributing
