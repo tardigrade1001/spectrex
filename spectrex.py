@@ -1,6 +1,6 @@
 """Convert Hitachi UV-Vis (.UDS) and Fluorescence (.FDS) binary files to CSV+PNG.
 
-Usage:  python spectrex.py            # walk the script's folder recursively
+Usage:  python spectrex.py            # open the folder-picker window
         python spectrex.py <folder>   # walk the given folder recursively
 
 UDS (U-2900 spectrophotometer):
@@ -9,8 +9,7 @@ UDS (U-2900 spectrophotometer):
 
 FDS (F-4600 fluorescence spectrometer):
   Magic IIHIDTAG. Each data record is 5 oversampled doubles (0.2 nm stride).
-  We decimate to every 5th (1.0 nm) to match the instrument's TXT export.
-  Set DECIMATE_FDS=False below for full 0.2 nm resolution.
+  We output the full 0.2 nm internal resolution.
 
 Run output:
   OK   <relpath>: <kind> <N> pts <start>-<end> nm
@@ -18,7 +17,7 @@ Run output:
 
 Errors are also appended to spectrex.log alongside the script for later review.
 """
-import struct, os, sys, glob, math, traceback, datetime
+import struct, os, sys, glob, math, traceback, datetime, threading, queue
 import matplotlib.pyplot as plt
 
 # ---------------- diagnostics ----------------
@@ -27,9 +26,10 @@ class ParseError(RuntimeError):
     """Raised by parsers with a human-readable explanation of what went wrong."""
 
 LOG_FILE = None  # set in main()
+LOG_SINK = print
 
 def log(msg):
-    print(msg)
+    LOG_SINK(msg)
     if LOG_FILE:
         try:
             with open(LOG_FILE, "a", encoding="utf-8") as f:
@@ -173,6 +173,7 @@ def parse_fds(buf):
     try:
         sample, off    = _cstr(buf, off, "sample name")
         operator, off  = _cstr(buf, off, "operator")
+        comment, off   = _cstr(buf, off, "comment")
         timestamp, off = _cstr(buf, off, "timestamp")
     except ParseError as e:
         raise ParseError(f"FDS header strings: {e}")
@@ -214,6 +215,15 @@ def parse_fds(buf):
         values.extend(struct.unpack_from("<5d", buf, data_off + i*rec_size))
     step = storage_step
 
+    # The last partial five-value record is padded with four footer doubles.
+    # Its final double is the requested emission end wavelength, so retain
+    # exactly the samples from start through that endpoint.
+    end_nm = struct.unpack_from("<d", buf, data_end - 8)[0]
+    expected_points = round((end_nm - start_nm) / step) + 1
+    if (180 <= end_nm <= 1500 and end_nm >= start_nm and
+            1 <= expected_points <= len(values)):
+        values = values[:expected_points]
+
     wavelengths = [start_nm + i * step for i in range(len(values))]
 
     # Excitation wavelength: first double of the footer (at data_end)
@@ -223,7 +233,7 @@ def parse_fds(buf):
         if 180 <= v <= 1500:
             excitation_wl = v
 
-    return dict(kind="FDS", sample=sample, timestamp=timestamp, operator=operator,
+    return dict(kind="FDS", sample=sample, timestamp=timestamp, operator=operator, comment=comment,
                 instrument=instrument, serial=serial, version=rom,
                 y_label="fluorescence", wavelengths=wavelengths, values=values,
                 step_nm=step, excitation_wl_nm=excitation_wl)
@@ -251,6 +261,8 @@ def write_csv(p, csv_path):
         f.write(f"# Timestamp: {p['timestamp']}\n")
         if p.get("operator") is not None:
             f.write(f"# Operator: {p['operator']}\n")
+        if p.get("comment"):
+            f.write(f"# Comment: {p['comment']}\n")
         f.write(f"# Instrument: {p['instrument']}  SN {p['serial']}  v{p['version']}\n")
         f.write(f"# Points: {len(p['values'])}  Range: {p['wavelengths'][0]:.2f}-{p['wavelengths'][-1]:.2f} nm\n")
         f.write(f"# Sampling step: {fmt(p.get('step_nm'), ' nm')}\n")
@@ -291,26 +303,44 @@ def write_overlay(group, png_path, ylabel):
 
 # ---------------- driver ----------------
 
-def main():
-    global LOG_FILE
-    root = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.abspath(__file__))
+def find_spectrum_files(inputs):
+    """Resolve folders and individual files into a de-duplicated input list."""
+    paths = []
+    for item in inputs:
+        if os.path.isdir(item):
+            for ext in ("*.UDS", "*.uds", "*.FDS", "*.fds"):
+                paths.extend(glob.glob(os.path.join(item, "**", ext), recursive=True))
+        elif os.path.isfile(item) and os.path.splitext(item)[1].lower() in {".uds", ".fds"}:
+            paths.append(item)
+    return sorted({os.path.normpath(path) for path in paths})
+
+
+def convert_folder(root, report=print):
+    """Convert all supported files below root and return (succeeded, failed)."""
     if not os.path.isdir(root):
-        print(f"ERROR: '{root}' is not a directory")
-        sys.exit(1)
+        raise ValueError(f"'{root}' is not a directory")
+    return convert_paths(find_spectrum_files([root]), root, report)
+
+
+def convert_paths(paths, root=None, report=print):
+    """Convert explicit UDS/FDS paths and return (succeeded, failed)."""
+    global LOG_FILE, LOG_SINK
+    LOG_SINK = report
+    paths = sorted({os.path.normpath(path) for path in paths})
+    if root is None:
+        try:
+            root = os.path.commonpath([os.path.dirname(path) for path in paths])
+        except ValueError:
+            root = os.path.dirname(paths[0]) if paths else os.getcwd()
 
     LOG_FILE = os.path.join(root, "spectrex.log")
     with open(LOG_FILE, "w", encoding="utf-8") as f:
         f.write(f"spectrex run at {datetime.datetime.now().isoformat(timespec='seconds')}\n")
         f.write(f"root: {root}\n\n")
 
-    paths = []
-    for ext in ("*.UDS", "*.uds", "*.FDS", "*.fds"):
-        paths += glob.glob(os.path.join(root, "**", ext), recursive=True)
-    paths = sorted({os.path.normpath(p) for p in paths})
-
     if not paths:
-        log(f"No .UDS or .FDS files found under {root}")
-        return
+        log("No .UDS or .FDS files were selected or found in the chosen folders")
+        return 0, 0
 
     n_ok = n_fail = 0
     uds_group, fds_group = [], []
@@ -384,6 +414,232 @@ def main():
                     log(f"FAIL [overlay {fname}]: {type(e).__name__}: {e}")
 
     log(f"\nDone. {n_ok} succeeded, {n_fail} failed. Log: {os.path.relpath(LOG_FILE, root)}")
+    return n_ok, n_fail
+
+
+def launch_gui():
+    """Polished native Windows interface used when the EXE is double-clicked."""
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, ttk
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+
+    app = TkinterDnD.Tk()
+    app.title("SpectreX")
+    app.geometry("760x590")
+    app.minsize(640, 500)
+    app.configure(bg="#f6f7fb")
+
+    style = ttk.Style(app)
+    style.theme_use("clam")
+    style.configure("App.TFrame", background="#f6f7fb")
+    style.configure("Header.TFrame", background="#312e81")
+    style.configure("Card.TFrame", background="#ffffff")
+    style.configure("Header.Title.TLabel", background="#312e81", foreground="#ffffff",
+                    font=("Segoe UI", 23, "bold"))
+    style.configure("Header.Subtitle.TLabel", background="#312e81", foreground="#d9d8ff",
+                    font=("Segoe UI", 10))
+    style.configure("Title.TLabel", background="#ffffff", foreground="#1e1b4b",
+                    font=("Segoe UI", 13, "bold"))
+    style.configure("Muted.TLabel", background="#ffffff", foreground="#6b7280", font=("Segoe UI", 10))
+    style.configure("Status.TLabel", background="#ffffff", foreground="#374151", font=("Segoe UI", 10))
+    style.configure("Spectre.Horizontal.TProgressbar", troughcolor="#ede9fe", background="#8b5cf6",
+                    lightcolor="#8b5cf6", darkcolor="#8b5cf6", bordercolor="#ede9fe", thickness=8)
+    style.configure("Accent.TButton", background="#db2777", foreground="#ffffff",
+                    font=("Segoe UI", 10, "bold"), borderwidth=0, padding=(18, 10))
+    style.map("Accent.TButton", background=[("active", "#be185d"), ("disabled", "#f2b5d1")])
+    style.configure("Quiet.TButton", background="#ffffff", foreground="#4338ca",
+                    font=("Segoe UI", 10, "bold"), borderwidth=0, padding=(10, 6))
+    style.map("Quiet.TButton", background=[("active", "#eef2ff")])
+
+    selected = tk.StringVar()
+    status = tk.StringVar(value="Choose the folder containing your .UDS and/or .FDS files.")
+    events = queue.Queue()
+    last_folder = [None]
+    details_visible = [False]
+    selected_inputs = []
+    processed = [0]
+    selected_total = [0]
+
+    header = ttk.Frame(app, style="Header.TFrame", padding=(32, 24))
+    header.pack(fill="x")
+    ttk.Label(header, text="SpectreX", style="Header.Title.TLabel").pack(anchor="w")
+    ttk.Label(header, text="Turn locked Hitachi spectra into usable CSV files and plots.",
+              style="Header.Subtitle.TLabel").pack(anchor="w", pady=(2, 0))
+
+    frame = ttk.Frame(app, style="App.TFrame", padding=(32, 24))
+    frame.pack(fill="both", expand=True)
+
+    card = ttk.Frame(frame, style="Card.TFrame", padding=22)
+    card.pack(fill="x")
+    ttk.Label(card, text="Drop spectra here, or choose what to convert", style="Title.TLabel").pack(anchor="w")
+    ttk.Label(card, text="Drop a folder to scan it and its subfolders, or drop individual .UDS and .FDS files.",
+              style="Muted.TLabel", wraplength=650).pack(anchor="w", pady=(3, 15))
+
+    chooser = ttk.Frame(card, style="Card.TFrame")
+    chooser.pack(fill="x")
+    entry = ttk.Entry(chooser, textvariable=selected, font=("Segoe UI", 10))
+    entry.pack(side="left", fill="x", expand=True, ipady=7)
+
+    def choose_folder():
+        folder = filedialog.askdirectory(title="Choose a folder of spectrum files")
+        if folder:
+            set_selection([folder])
+
+    def choose_files():
+        paths = filedialog.askopenfilenames(
+            title="Choose spectrum files",
+            filetypes=[("Hitachi spectrum files", "*.uds *.UDS *.fds *.FDS"), ("All files", "*.*")])
+        if paths:
+            set_selection(list(paths))
+
+    def set_selection(inputs):
+        selected_inputs[:] = [os.path.normpath(path) for path in inputs]
+        if len(inputs) == 1:
+            selected.set(selected_inputs[0])
+        else:
+            selected.set(f"{len(inputs)} individual spectrum files selected")
+
+    browse = ttk.Button(chooser, text="Browse...", style="Quiet.TButton", command=choose_folder)
+    browse.pack(side="left", padx=(8, 0))
+    files_button = ttk.Button(chooser, text="Choose files", style="Quiet.TButton", command=choose_files)
+    files_button.pack(side="left", padx=(4, 0))
+
+    controls = ttk.Frame(card, style="Card.TFrame")
+    controls.pack(fill="x", pady=(18, 0))
+    run_button = ttk.Button(controls, text="Convert spectra", style="Accent.TButton", state="disabled")
+    run_button.pack(side="left")
+    ttk.Label(controls, text="CSV and PNG files are saved beside each original file.",
+              style="Muted.TLabel").pack(side="left", padx=(14, 0))
+
+    result_card = ttk.Frame(frame, style="Card.TFrame", padding=22)
+    result_card.pack(fill="x", pady=(18, 0))
+    result_title = ttk.Label(result_card, text="Ready when you are", style="Title.TLabel")
+    result_title.pack(anchor="w")
+    ttk.Label(result_card, textvariable=status, style="Status.TLabel", wraplength=650).pack(anchor="w", pady=(4, 12))
+    progress_text = tk.StringVar(value="No files selected yet")
+    progress = ttk.Progressbar(result_card, style="Spectre.Horizontal.TProgressbar", mode="determinate", maximum=1)
+    progress.pack(fill="x")
+    ttk.Label(result_card, textvariable=progress_text, style="Muted.TLabel").pack(anchor="w", pady=(5, 12))
+
+    result_actions = ttk.Frame(result_card, style="Card.TFrame")
+    result_actions.pack(fill="x")
+    open_button = ttk.Button(result_actions, text="Open output folder", style="Quiet.TButton", state="disabled")
+    open_button.pack(side="left")
+    details_button = ttk.Button(result_actions, text="Show details", style="Quiet.TButton")
+    details_button.pack(side="left", padx=(8, 0))
+
+    output = tk.Text(frame, height=10, wrap="word", state="disabled", font=("Cascadia Mono", 9),
+                     bg="#15143f", fg="#e9e8ff", insertbackground="#ffffff", relief="flat", padx=12, pady=10)
+
+    def append(text):
+        output.configure(state="normal")
+        output.insert("end", text + "\n")
+        output.see("end")
+        output.configure(state="disabled")
+
+    def toggle_details():
+        details_visible[0] = not details_visible[0]
+        if details_visible[0]:
+            output.pack(fill="both", expand=True, pady=(14, 0))
+            details_button.configure(text="Hide details")
+        else:
+            output.pack_forget()
+            details_button.configure(text="Show details")
+
+    def open_output_folder():
+        if last_folder[0]:
+            os.startfile(last_folder[0])
+
+    def receive_drop(event):
+        inputs = list(app.tk.splitlist(event.data))
+        usable = [path for path in inputs if os.path.isdir(path) or
+                  (os.path.isfile(path) and os.path.splitext(path)[1].lower() in {".uds", ".fds"})]
+        if not usable:
+            messagebox.showwarning("SpectreX", "Drop a folder or one or more .UDS / .FDS files.")
+            return
+        set_selection(usable)
+        status.set("Ready to convert the dropped selection.")
+
+    def poll_events():
+        try:
+            while True:
+                kind, payload = events.get_nowait()
+                if kind == "log":
+                    append(payload)
+                    if payload.startswith("OK   ") or payload.startswith("FAIL "):
+                        processed[0] += 1
+                        progress.configure(value=processed[0])
+                        progress_text.set(f"Processed {processed[0]} of {selected_total[0]} file(s)")
+                else:
+                    ok, failed, error = payload
+                    browse.configure(state="normal"); files_button.configure(state="normal")
+                    run_button.configure(state="normal" if selected.get().strip() else "disabled")
+                    if error:
+                        result_title.configure(text="Conversion could not start")
+                        status.set("Conversion could not start.")
+                        messagebox.showerror("SpectreX", error)
+                    else:
+                        result_title.configure(text="Conversion complete")
+                        status.set(f"{ok} file(s) converted, {failed} failed. CSV and PNG files are beside the originals.")
+                        open_button.configure(state="normal")
+                        if failed:
+                            details_button.configure(text=f"Show {failed} error detail{'s' if failed != 1 else ''}")
+                            if not details_visible[0]:
+                                toggle_details()
+        except queue.Empty:
+            pass
+        app.after(100, poll_events)
+
+    def start_conversion():
+        if not selected_inputs:
+            messagebox.showwarning("SpectreX", "Choose or drop a folder or spectrum file first.")
+            return
+        paths = find_spectrum_files(selected_inputs)
+        if not paths:
+            messagebox.showwarning("SpectreX", "No .UDS or .FDS files were found in that selection.")
+            return
+        try:
+            root = os.path.commonpath([os.path.dirname(path) for path in paths])
+        except ValueError:
+            root = os.path.dirname(paths[0])
+        output.configure(state="normal"); output.delete("1.0", "end"); output.configure(state="disabled")
+        processed[0] = 0
+        selected_total[0] = len(paths)
+        progress.configure(maximum=len(paths), value=0)
+        progress_text.set(f"Preparing {len(paths)} file(s)")
+        browse.configure(state="disabled"); files_button.configure(state="disabled"); run_button.configure(state="disabled")
+        open_button.configure(state="disabled")
+        result_title.configure(text="Converting spectra")
+        status.set("Working through the selected folder. You can expand details to follow each file.")
+        last_folder[0] = root
+        def worker():
+            try:
+                ok, failed = convert_paths(paths, root, report=lambda m: events.put(("log", m)))
+                events.put(("done", (ok, failed, None)))
+            except Exception as exc:
+                events.put(("done", (0, 0, str(exc))))
+        threading.Thread(target=worker, daemon=True).start()
+
+    run_button.configure(command=start_conversion)
+    open_button.configure(command=open_output_folder)
+    details_button.configure(command=toggle_details)
+    for widget in (card, entry, chooser):
+        widget.drop_target_register(DND_FILES)
+        widget.dnd_bind("<<Drop>>", receive_drop)
+    selected.trace_add("write", lambda *_: run_button.configure(state="normal" if selected.get().strip() else "disabled"))
+    app.after(100, poll_events)
+    app.mainloop()
+
+
+def main():
+    if len(sys.argv) > 1:
+        try:
+            convert_folder(sys.argv[1])
+        except ValueError as e:
+            print(f"ERROR: {e}")
+            sys.exit(1)
+    else:
+        launch_gui()
 
 if __name__ == "__main__":
     main()

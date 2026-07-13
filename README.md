@@ -2,7 +2,7 @@
 
 Convert proprietary Hitachi spectrophotometer `.UDS` and `.FDS` binary files to plain CSV (and quick-look PNG plots) on any PC, without the original 1995-era Windows software.
 
-**📥 [Download `spectrex.exe` (no Python required)](https://github.com/tardigrade1001/spectrex/releases/latest)** for the standalone Windows build. Python users can run `spectrex.py` directly — see [Quick start](#quick-start).
+**📥 [Download `spectrex.exe` (no Python required)](https://github.com/tardigrade1001/spectrex/releases/latest)** for the standalone Windows build. Double-click it, choose a data folder, and follow the on-screen progress. Python users can run `spectrex.py` directly — see [Quick start](#quick-start).
 
 | UV-Vis absorbance (`.UDS`) | Fluorescence emission (`.FDS`) |
 |:---:|:---:|
@@ -51,13 +51,9 @@ Requirements: Python 3.8+ and `matplotlib`.
 pip install matplotlib
 ```
 
-Drop `spectrex.py` into the folder containing your data (subdirectories are walked automatically), then:
+Double-click `spectrex.py` (or `spectrex.exe`) and either drag in a folder, drag in one or more `.UDS` / `.FDS` files, or use the **Browse** and **Choose files** buttons. The window shows live progress, clear completion counts, and any file-specific errors.
 
-```bash
-python spectrex.py
-```
-
-Or point it at a specific folder:
+To run without the window, pass the data folder on the command line:
 
 ```bash
 python spectrex.py "C:/path/to/data"
@@ -75,7 +71,7 @@ Output looks like:
 OK   Abs/AgNP - 04.03.UDS: UDS 321 pts 280-600 nm
 OK   Abs/AgNP - 07.03.UDS: UDS 321 pts 280-600 nm
      note: 87/321 transmittance values are <=0 (very absorbing sample); absorbance set to NaN at those points
-OK   FDS/230222_sample_280nm.FDS: FDS 201 pts 300-500 nm
+OK   FDS/230222_sample_280nm.FDS: FDS 1001 pts 300-500 nm
   -> plots/_overlay_uds.png
   -> plots/_overlay_fds.png
 
