@@ -4,6 +4,14 @@ All notable releases of spectrex are documented here. Newest entries appear firs
 
 ---
 
+## v1.1.0 — Desktop workflow update
+
+- Added a native Windows interface: drag in a folder or individual files, or choose them with the new buttons. The app shows per-file progress, a clear completion summary, and an expandable error log when anything fails.
+- Corrected FDS timestamp parsing and excluded four footer values that could otherwise appear as false spectrum data beyond the requested end wavelength.
+- Replaced the old icon with a spectrum-and-cuvette mark.
+
+---
+
 ## v1.0.0 — First public release
 
 First public release of spectrex.
@@ -21,12 +29,12 @@ Supports:
 Download `spectrex.exe` below (64 MB, single file, no installation).
 
 Two ways to run it:
-1. Drop the exe into a folder containing your `.UDS` / `.FDS` files and double-click. It walks every subfolder, writing a `.csv` and `.png` next to each binary.
+1. Double-click the exe, choose a folder, and press **Convert files**. The window displays live progress and a clear result summary.
 2. Drag a folder *onto* `spectrex.exe` in File Explorer. The exe processes that folder and its subfolders.
 
 A `spectrex.log` summary is written at the end of every run.
 
-The window stays open after processing so you can read the success/failure summary. Close it when you're done.
+CSV and PNG files are written next to each original binary, and `spectrex.log` contains the complete run summary.
 
 ### For Python users
 
@@ -51,4 +59,4 @@ A subset of FDS acquisition parameters (scan speed, EX/EM slit widths, PMT volta
 
 ### Antivirus note
 
-PyInstaller-bundled exes occasionally trigger Windows Defender false positives. If your AV flags `spectrex.exe`, the source in this repo is what was built. Feel free to verify by building locally with `pyinstaller --onefile --icon=spectrex.ico spectrex.py`.
+PyInstaller-bundled exes occasionally trigger Windows Defender false positives. If your AV flags `spectrex.exe`, the source in this repo is what was built. Feel free to verify by building locally with `pyinstaller --onefile --windowed --icon=spectrex.ico spectrex.py`.
