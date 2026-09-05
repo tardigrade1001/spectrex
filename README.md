@@ -1,8 +1,8 @@
 # spectrex
 
-Convert proprietary Hitachi spectrophotometer `.UDS` and `.FDS` binary files to plain CSV (and quick-look PNG plots) on any PC, without the original 1995-era Windows software.
+Convert proprietary Hitachi spectrophotometer `.UDS` and `.FDS` binary files to plain CSV (and quick-look PNG plots) on any PC, using Python alone.
 
-**📥 [Download `spectrex.exe` (no Python required)](https://github.com/tardigrade1001/spectrex/releases/latest)** for the standalone Windows build. Double-click it, choose a data folder, and follow the on-screen progress. Python users can run `spectrex.py` directly — see [Quick start](#quick-start).
+**📥 [Download `spectrex.exe`](https://github.com/tardigrade1001/spectrex/releases/latest)** for the standalone Windows build, which runs unaided. Double-click it, choose a data folder, and follow the on-screen progress. Python users can run `spectrex.py` directly, see [Quick start](#quick-start).
 
 | UV-Vis absorbance (`.UDS`) | Fluorescence emission (`.FDS`) |
 |:---:|:---:|
@@ -11,11 +11,11 @@ Convert proprietary Hitachi spectrophotometer `.UDS` and `.FDS` binary files to 
 
 ## The problem this solves
 
-The Hitachi UV Solutions and FL Solutions programs save data in their own binary format by default. They offer a checkbox to also export a plain TXT file at save time. If that checkbox stays unticked, the resulting `.UDS`/`.FDS` files cannot be opened by anything else on your laptop.
+The Hitachi UV Solutions and FL Solutions programs save data in a proprietary binary format by default. They offer a checkbox to also export a plain TXT file at save time. If that checkbox stays unticked, the resulting `.UDS`/`.FDS` files open only in that software.
 
-The usual workaround is to physically go back to the instrument PC, open each file one at a time in the original software, and use its "export to TXT" command. This becomes painful when the instrument PC is busy, in another building, or running an old Windows version you would rather not touch.
+The usual workaround is to physically go back to the instrument PC, open each file one at a time in the original software, and run the "export to TXT" command. This becomes painful when the instrument PC is busy, in another building, or running an awkward old Windows version.
 
-This script reads those binary files directly. Users can now convert anywhere: their own laptop, a shared drive, a backup of old measurements, with no need to return to the instrument.
+This script reads those binary files directly. Conversion runs anywhere: a laptop, a shared drive, a backup of old measurements, with the instrument PC left out of the loop.
 
 ## Background
 
@@ -24,7 +24,7 @@ The instruments this targets:
 - **Hitachi U-2900 Spectrophotometer**. UV-Vis absorbance, writes `.UDS` files. Controlled by *UV Solutions 4.2*.
 - **Hitachi F-4600 FL Spectrophotometer**. Fluorescence, writes `.FDS` files. Controlled by *FL Solutions*.
 
-Both are Windows 9x-era programs. The binary file formats are not publicly documented. The only built-in way to get data out is to open each file in the program and run its "export to TXT" command, one file at a time.
+Both are Windows 9x-era programs. The binary file formats are undocumented publicly. The one built-in route out is to open each file in the program and run the "export to TXT" command, one file at a time.
 
 This tool reverse-engineers both formats and converts a whole tree of files in one pass.
 
@@ -53,13 +53,13 @@ pip install matplotlib
 
 Double-click `spectrex.py` (or `spectrex.exe`) and either drag in a folder, drag in one or more `.UDS` / `.FDS` files, or use the **Browse** and **Choose files** buttons. The window shows live progress, clear completion counts, and any file-specific errors.
 
-To run without the window, pass the data folder on the command line:
+To skip the window, pass the data folder on the command line:
 
 ```bash
 python spectrex.py "C:/path/to/data"
 ```
 
-The repository includes a `samples/` folder with one UDS file and one FDS file, plus their original TXT exports for ground-truth comparison, so you can try the tool immediately:
+The repository includes a `samples/` folder with one UDS file and one FDS file, plus the original TXT exports for ground-truth comparison, so the tool can be tried immediately:
 
 ```bash
 python spectrex.py samples
@@ -128,11 +128,11 @@ Wavelengths are always ascending. The value column is `absorbance` for UDS and `
 
 ### Note on FDS parameter extraction
 
-UDS files store acquisition parameters as plain little-endian doubles in known offsets, so the full set (scan speed, slit width, path length, lamp change wavelength, baseline correction, response setting) is recovered. FDS files store some parameters in an encoded form that has not been mapped yet: scan speed, EX/EM slit widths, PMT voltage, response time, and delay. Differential analysis against multiple FDS files with varying parameters did not surface their offsets as plain doubles, suggesting they may be stored as setting codes or in a lookup-indexed format. These fields currently appear as a note in the FDS CSV header. Contributions are welcome.
+UDS files store acquisition parameters as plain little-endian doubles in known offsets, so the full set (scan speed, slit width, path length, lamp change wavelength, baseline correction, response setting) is recovered. FDS files store some parameters in an encoded form still to be mapped: scan speed, EX/EM slit widths, PMT voltage, response time, and delay. Differential analysis against multiple FDS files with varying parameters left the offsets as plain doubles, suggesting they may be stored as setting codes or in a lookup-indexed format. These fields currently appear as a note in the FDS CSV header. Contributions are welcome.
 
 ## How the formats work
 
-This is the part that matters if someone wants to extend the tool or write their own parser. Both formats use little-endian IEEE-754 doubles throughout.
+This is the part that matters for extending the tool or writing a separate parser. Both formats use little-endian IEEE-754 doubles throughout.
 
 ### UDS (Hitachi U-2900, file extension `.UDS`)
 
@@ -170,7 +170,7 @@ Key facts:
 - The instrument stores **transmittance T**. The TXT export converts via `A = -log₁₀(T)`. We do the same.
 - Data is stored in **scan order**. Scans run high to low wavelength, so `data[0]` corresponds to the start wavelength (the higher one). We reverse before writing the CSV.
 - The end of the data array is detected by the sentinel value `600.0` that begins the footer. Any double with `abs(v) > 5` is out of the transmittance range and signals end of data.
-- The header parameter triple is `[lamp_change_wl, step, start_wl]`. End wavelength is not stored in the header; it gets derived from data length × step.
+- The header parameter triple is `[lamp_change_wl, step, start_wl]`. End wavelength is derived from data length × step.
 
 ### FDS (Hitachi F-4600, file extension `.FDS`)
 
@@ -218,7 +218,7 @@ Things that will break it (and what the error message will say):
 
 - A different instrument (e.g., Hitachi F-2700, F-7000) producing files with a different magic or anchor → `unrecognized magic bytes` or `instrument anchor 'F-4600' not found`.
 - A different software version that omits the `"Reagent 1\0"` footer marker → `footer marker 'Reagent 1\0' not found after data block`.
-- An FDS file where storage_step is not ≈ 0.2 nm → `storage_step X outside expected range`.
+- An FDS file whose storage_step falls outside ≈ 0.2 nm → `storage_step X outside expected range`.
 - A UDS file with a step value outside the whitelist → `UDS data block not found`.
 
 Every failure is tagged with the stage (`[parse]`, `[csv]`, `[png]`) and a human-readable reason. Unexpected exceptions also dump a Python traceback. Everything goes to both stdout and `spectrex.log`.
@@ -246,27 +246,27 @@ your-data-folder/
     └── ...
 ```
 
-The script does not care how your folders are organised. It just walks the tree.
+The script walks whatever tree it is pointed at, in any folder layout.
 
 ## Customisation
 
 A few knobs near the top of `spectrex.py`:
 
-- Plot colour: the single-spectrum colour is `#e91e63` (pink). The overlay plot uses matplotlib's default colour cycle so each spectrum is distinguishable.
+- Plot colour: the single-spectrum colour is `#e91e63` (pink). The overlay plot uses the default matplotlib colour cycle so each spectrum is distinguishable.
 
 ## Contributing
 
-If you have UDS/FDS files from a related Hitachi instrument that this tool does not handle, the fastest path to support is to drop a sample file plus the matching TXT export (from the original program) into an issue. The TXT gives the ground truth needed to verify any new format variant.
+For UDS/FDS files from a related Hitachi instrument still outside the supported set, the fastest path to support is to drop a sample file plus the matching TXT export (from the original program) into an issue. The TXT gives the ground truth needed to verify any new format variant.
 
 ---
 
 ## The Story Behind This
 
-This started as a workflow frustration. Our lab's Hitachi instruments save data in their own binary format, with an optional checkbox to also emit a plain TXT file at save time. If that checkbox is missed, which happens often in practice, the data is effectively locked to the instrument PC. Only the original 1995-era software can open it.
+This started as a workflow frustration. The lab Hitachi instruments save data in a proprietary binary format, with an optional checkbox to also emit a plain TXT file at save time. If that checkbox is missed, which happens often in practice, the data is effectively locked to the instrument PC. Only the original 1995-era software can open it.
 
-For a long time the workaround was to physically return to the instrument, queue files in the original program, and export them one at a time. That is fine for one file. It is painful for a backlog of measurements, especially when the instrument PC is busy, in another building, or running a Windows version no one wants to touch.
+For a long time the workaround was to physically return to the instrument, queue files in the original program, and export them one at a time. That is fine for one file. It is painful for a backlog of measurements, especially when the instrument PC is busy, in another building, or running an awkward Windows version.
 
-The initial assumption was that cracking the format would require decompiling the original `.exe`. That turned out to be unnecessary. The binary formats use simple little-endian doubles with readable ASCII string headers, and the original program's own TXT export provided ground truth to verify against. A single afternoon of hex dumps and `struct.unpack_from` calls was enough to pin down both file formats.
+The initial assumption was that cracking the format would require decompiling the original `.exe`. A simpler route worked. The binary formats use plain little-endian doubles with readable ASCII string headers, and the TXT export from the original program provided ground truth to verify against. A single afternoon of hex dumps and `struct.unpack_from` calls was enough to pin down both file formats.
 
 The technical sequence:
 
@@ -274,26 +274,26 @@ The technical sequence:
 2. **Spotted plausible doubles in the header.** Scanning the bytes after the strings, several 8-byte chunks decoded to round numbers (340.0, 1.0, 600.0). Those had to be scan parameters.
 3. **Got TXT ground truth.** Exporting one file via the original software gave a definitive "this wavelength → this value" mapping to verify against.
 4. **First wrong guess (UDS).** The three doubles were initially assumed to be `[start, step, end]`. The CSV looked plausible. The plot then appeared flipped, with wavelengths increasing where absorbance should be peaking and vice versa.
-5. **Realised UDS stores transmittance.** Binary value 0.7278 at the first position did not match the TXT's 0.138. Trying `-log₁₀(0.7278) = 0.138` produced a match. This also revealed that the doubles were really `[lamp_change_wl, step, start_wl]`.
+5. **Realised UDS stores transmittance.** Binary value 0.7278 at the first position sat against 0.138 in the TXT. Trying `-log₁₀(0.7278) = 0.138` produced a match. This also revealed that the doubles were really `[lamp_change_wl, step, start_wl]`.
 6. **Spotted the FDS oversampling.** First FDS values almost matched the TXT: `data[0] = 154.16` against `TXT[0] = 154.2`, then `data[1] = 154.31` against `TXT[1] = 160.2`. Checking every Nth value showed a clean match at stride 5: 5 internal samples per 1 nm TXT row. The `0.2` double sitting just before the data confirmed the storage step.
 7. **Found stable end-of-data markers** by inspecting what came after the expected data range. UDS uses a `600.0` sentinel. FDS uses the literal string `"Reagent 1"` 32 bytes after the data block.
-8. **Verified end-to-end** against the program's own TXT exports for every file in the test set. Max absolute difference: 0.0005 for absorbance (TXT's display precision), and ~0.5 for fluorescence intensity (also display precision).
+8. **Verified end-to-end** against the TXT exports from that program for every file in the test set. Max absolute difference: 0.0005 for absorbance (the TXT display precision), and ~0.5 for fluorescence intensity (also display precision).
 
 ### Follow-up: trying to recover the FDS acquisition parameters
 
-The header extraction works cleanly for UDS. Every parameter visible in the program's TXT export (slit width, scan speed, path length, lamp change wavelength, baseline correction, response setting) is stored as a plain little-endian double at a fixed offset, so spectrex emits all of them in the CSV header.
+The header extraction works cleanly for UDS. Every parameter visible in the TXT export (slit width, scan speed, path length, lamp change wavelength, baseline correction, response setting) is stored as a plain little-endian double at a fixed offset, so spectrex emits all of them in the CSV header.
 
-FDS resisted the same treatment. Several acquisition parameters (scan speed, EX/EM slit widths, PMT voltage, response time, delay) do not appear in the FDS binary as their displayed values. To investigate, the following angles were tried:
+FDS resisted the same treatment. Several acquisition parameters (scan speed, EX/EM slit widths, PMT voltage, response time, delay) appear in the FDS binary in some other form. To investigate, the following angles were tried:
 
-1. **Differential analysis across an FDS archive** of ~300 files with mixed parameters. Files were paired so that everything matched except one knob (e.g., scan speed 1200 nm/min vs 240 nm/min, slits 5.0 nm vs 2.5 nm). Byte-level diffs of the binary pairs found only the comment field and embedded filename changing. No byte position tracked the parameter change as a plain double.
+1. **Differential analysis across an FDS archive** of ~300 files with mixed parameters. Files were paired so that everything matched except one knob (e.g., scan speed 1200 nm/min vs 240 nm/min, slits 5.0 nm vs 2.5 nm). Byte-level diffs of the binary pairs found the comment field and embedded filename changing alone. Every byte position tracked the parameter change as a plain double.
 
-2. **Inspecting the FL Solutions installation directory**. The program ships with `.FLM` method templates (same `IIHIDTAG` magic as FDS, denser parameter block) and `flsol.MDB`, a Microsoft Access database. The FLM templates exposed a tightly packed parameter region, but the doubles in it were values like `211, 163, 13, 19, 103, 220, 9000` rather than the human-readable parameter values seen in TXT exports. These look like internal acquisition counters or setting indices.
+2. **Inspecting the FL Solutions installation directory**. The program ships with `.FLM` method templates (same `IIHIDTAG` magic as FDS, denser parameter block) and `flsol.MDB`, a Microsoft Access database. The FLM templates exposed a tightly packed parameter region holding doubles like `211, 163, 13, 19, 103, 220, 9000`, against the human-readable parameter values seen in TXT exports. These look like internal acquisition counters or setting indices.
 
-3. **Reading the MDB**. The Access driver refused the file as "created with a previous version" (Jet 3.x / Access 97 era). A text-strings scan of the MDB found 99 strings total, none of which were parameter-table names. The MDB does not store the parameter lookup tables in plain text.
+3. **Reading the MDB**. The Access driver refused the file as "created with a previous version" (Jet 3.x / Access 97 era). A text-strings scan of the MDB found 99 strings total, all of them outside the parameter-table names. The MDB holds the parameter lookup tables in some encoded form.
 
-The conclusion is that FDS stores these parameters as **internal setting codes**, and the codes-to-human-readable-values mapping lives inside the program's DLLs (`flmethod.dll`, `flprop.dll`) as compiled tables. Extracting them would require disassembling the DLLs with a tool like Ghidra. That is a separate undertaking outside the scope of spectrex.
+The conclusion is that FDS stores these parameters as **internal setting codes**, and the codes-to-human-readable-values mapping lives inside the DLLs (`flmethod.dll`, `flprop.dll`) as compiled tables. Extracting them would require disassembling the DLLs with a tool like Ghidra. That is a separate undertaking outside the scope of spectrex.
 
-**This limitation does not affect the spectrum data itself.** The wavelength axis and intensity values for both UDS and FDS files are decoded exactly and verified byte-for-byte against the original program's TXT exports. The missing FDS fields are metadata about how the scan was acquired, not the scan data. Spectrex emits a note in the FDS CSV header listing which fields are not yet extracted, so anyone reading the output knows what is and is not available.
+**The spectrum data itself is unaffected.** The wavelength axis and intensity values for both UDS and FDS files are decoded exactly and verified byte-for-byte against the TXT exports from the original program. The absent FDS fields are metadata describing how the scan was acquired, and the scan data is complete. Spectrex emits a note in the FDS CSV header listing which fields remain to be extracted, so anyone reading the output knows the coverage.
 
 If you ever need those FDS acquisition parameters for a specific file, the simplest workaround is to re-export from FL Solutions with the "Save as TXT" checkbox ticked. The TXT will list every parameter the binary contains.
 
